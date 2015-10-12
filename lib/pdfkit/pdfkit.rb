@@ -58,17 +58,17 @@ class PDFKit
   def to_pdf(path=nil)
     append_stylesheets
 
-    args = command(path)
-    invoke = args.join(' ')
+    invoke = command(path).join(' ')
 
-    result = IO.popen(invoke, "w+") do |pdf|
+    result = IO.popen(invoke, "wb+") do |pdf|
       pdf.puts(@source.to_s) if @source.html?
       pdf.close_write
-      pdf.gets(nil)
+      pdf.gets(nil) if path.nil?
     end
-    result = File.read(path) if path
 
-    raise "command failed: #{invoke}" if result.to_s.strip.empty?
+    # $? is thread safe per
+    # http://stackoverflow.com/questions/2164887/thread-safe-external-process-in-ruby-plus-checking-exitstatus
+    raise "command failed (exitstatus=#{$?.exitstatus}): #{invoke}" if empty_result?(path, result) or !successful?($?)
     return result
   end
 
@@ -112,6 +112,20 @@ class PDFKit
           @source.to_s.insert(0, style_tag_for(stylesheet))
         end
       end
+    end
+
+    def successful?(status)
+      return true if status.success?
+
+      # Some of the codes: https://code.google.com/p/wkhtmltopdf/issues/detail?id=1088
+      # returned when assets are missing (404): https://code.google.com/p/wkhtmltopdf/issues/detail?id=548
+      return true if status.exitstatus == 2 && @renderer.error_handling?
+
+      false
+    end
+
+    def empty_result?(path, result)
+      (path && File.size(path) == 0) || (path.nil? && result.to_s.strip.empty?)
     end
 
     def normalize_options(options)
